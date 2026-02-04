@@ -8,3 +8,6 @@ progress.txt
 
 # OS files
 .DS_Store
+
+# Log files from ralph runs
+logs/
