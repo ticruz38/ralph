@@ -1,4 +1,4 @@
-import { useCallback, useState, useRef } from 'react';
+import { useCallback, useState, useRef, useEffect } from 'react';
 import type { Node, Edge, NodeChange, EdgeChange, Connection } from '@xyflow/react';
 import {
   ReactFlow,
@@ -18,12 +18,53 @@ import {
 import '@xyflow/react/dist/style.css';
 import './App.css';
 
+// Priority types
+type Priority = 'high' | 'medium' | 'low';
+
+interface Task {
+  id: string;
+  title: string;
+  priority: Priority;
+  completed: boolean;
+}
+
+// Priority colors
+const priorityColors: Record<Priority, { bg: string; border: string; label: string }> = {
+  high: { bg: '#fee2e2', border: '#dc2626', label: 'High' },
+  medium: { bg: '#fef3c7', border: '#f59e0b', label: 'Medium' },
+  low: { bg: '#f3f4f6', border: '#6b7280', label: 'Low' },
+};
+
+// Load tasks from localStorage
+function loadTasks(): Task[] {
+  try {
+    const saved = localStorage.getItem('ralph-tasks');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch (e) {
+    console.error('Failed to load tasks:', e);
+  }
+  // Default sample tasks
+  return [
+    { id: '1', title: 'Set up project structure', priority: 'high', completed: true },
+    { id: '2', title: 'Design database schema', priority: 'high', completed: false },
+    { id: '3', title: 'Implement authentication', priority: 'medium', completed: false },
+    { id: '4', title: 'Write documentation', priority: 'low', completed: false },
+  ];
+}
+
+// Save tasks to localStorage
+function saveTasks(tasks: Task[]) {
+  try {
+    localStorage.setItem('ralph-tasks', JSON.stringify(tasks));
+  } catch (e) {
+    console.error('Failed to save tasks:', e);
+  }
+}
+
 const nodeWidth = 240;
 const nodeHeight = 70;
-
-// Setup phase - horizontal at top
-// Loop phase - circular arrangement below
-// Exit - at bottom center
 
 type Phase = 'setup' | 'loop' | 'decision' | 'done';
 
@@ -225,9 +266,173 @@ function createNoteNode(note: typeof notes[0], visible: boolean, position?: { x:
   };
 }
 
+// Task Card Component
+function TaskCard({ 
+  task, 
+  onToggle, 
+  onPriorityChange,
+  onDelete,
+  onEdit 
+}: { 
+  task: Task;
+  onToggle: () => void;
+  onPriorityChange: (priority: Priority) => void;
+  onDelete: () => void;
+  onEdit: () => void;
+}) {
+  const colors = priorityColors[task.priority];
+  
+  return (
+    <div className="task-card" style={{ borderLeftColor: colors.border }}>
+      <div className="task-checkbox">
+        <input 
+          type="checkbox" 
+          checked={task.completed} 
+          onChange={onToggle}
+        />
+      </div>
+      <div className="task-content" onClick={onEdit}>
+        <div className="task-title">{task.title}</div>
+      </div>
+      <div className="task-priority">
+        <select 
+          value={task.priority}
+          onChange={(e) => onPriorityChange(e.target.value as Priority)}
+          onClick={(e) => e.stopPropagation()}
+          style={{ 
+            backgroundColor: colors.bg,
+            borderColor: colors.border,
+            color: colors.border
+          }}
+        >
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+      </div>
+      <button className="task-delete" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
+        ×
+      </button>
+    </div>
+  );
+}
+
+// Edit Task Modal
+function EditTaskModal({ 
+  task, 
+  onSave, 
+  onCancel 
+}: { 
+  task: Task | null;
+  onSave: (title: string, priority: Priority) => void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState(task?.title || '');
+  const [priority, setPriority] = useState<Priority>(task?.priority || 'medium');
+  
+  if (!task) return null;
+  
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <h2>Edit Task</h2>
+        <div className="form-group">
+          <label>Title</label>
+          <input 
+            type="text" 
+            value={title} 
+            onChange={(e) => setTitle(e.target.value)}
+            autoFocus
+          />
+        </div>
+        <div className="form-group">
+          <label>Priority</label>
+          <select 
+            value={priority}
+            onChange={(e) => setPriority(e.target.value as Priority)}
+            style={{ 
+              backgroundColor: priorityColors[priority].bg,
+              borderColor: priorityColors[priority].border
+            }}
+          >
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </div>
+        <div className="modal-actions">
+          <button className="btn-cancel" onClick={onCancel}>Cancel</button>
+          <button 
+            className="btn-save" 
+            onClick={() => onSave(title, priority)}
+            disabled={!title.trim()}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [visibleCount, setVisibleCount] = useState(1);
   const nodePositions = useRef<{ [key: string]: { x: number; y: number } }>({ ...positions });
+  
+  // Task state
+  const [tasks, setTasks] = useState<Task[]>(loadTasks);
+  const [filter, setFilter] = useState<Priority | 'all'>('all');
+  const [showTaskPanel, setShowTaskPanel] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  
+  // Save tasks to localStorage when they change
+  useEffect(() => {
+    saveTasks(tasks);
+  }, [tasks]);
+  
+  // Filter tasks
+  const filteredTasks = tasks.filter(task => {
+    if (filter === 'all') return true;
+    return task.priority === filter;
+  });
+  
+  // Task handlers
+  const addTask = useCallback(() => {
+    if (!newTaskTitle.trim()) return;
+    const newTask: Task = {
+      id: Date.now().toString(),
+      title: newTaskTitle.trim(),
+      priority: 'medium',
+      completed: false,
+    };
+    setTasks(prev => [...prev, newTask]);
+    setNewTaskTitle('');
+  }, [newTaskTitle]);
+  
+  const toggleTask = useCallback((id: string) => {
+    setTasks(prev => prev.map(t => 
+      t.id === id ? { ...t, completed: !t.completed } : t
+    ));
+  }, []);
+  
+  const updateTaskPriority = useCallback((id: string, priority: Priority) => {
+    setTasks(prev => prev.map(t => 
+      t.id === id ? { ...t, priority } : t
+    ));
+  }, []);
+  
+  const deleteTask = useCallback((id: string) => {
+    setTasks(prev => prev.filter(t => t.id !== id));
+  }, []);
+  
+  const saveEditedTask = useCallback((title: string, priority: Priority) => {
+    if (!editingTask) return;
+    setTasks(prev => prev.map(t => 
+      t.id === editingTask.id ? { ...t, title, priority } : t
+    ));
+    setEditingTask(null);
+  }, [editingTask]);
 
   const getNodes = (count: number) => {
     const stepNodes = allSteps.map((step, index) =>
@@ -325,9 +530,69 @@ function App() {
   return (
     <div className="app-container">
       <div className="header">
-        <h1>How Ralph Works with Amp</h1>
-        <p>Autonomous AI agent loop for completing PRDs</p>
+        <div className="header-content">
+          <div>
+            <h1>How Ralph Works with Amp</h1>
+            <p>Autonomous AI agent loop for completing PRDs</p>
+          </div>
+          <button 
+            className="task-panel-toggle"
+            onClick={() => setShowTaskPanel(!showTaskPanel)}
+          >
+            {showTaskPanel ? 'Hide Tasks' : 'Show Tasks'}
+          </button>
+        </div>
       </div>
+      
+      {/* Task Panel */}
+      {showTaskPanel && (
+        <div className="task-panel">
+          <div className="task-panel-header">
+            <h2>Tasks</h2>
+            <div className="task-filter">
+              <select value={filter} onChange={(e) => setFilter(e.target.value as Priority | 'all')}>
+                <option value="all">All</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+          </div>
+          
+          <div className="task-add">
+            <input
+              type="text"
+              placeholder="Add a new task..."
+              value={newTaskTitle}
+              onChange={(e) => setNewTaskTitle(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && addTask()}
+            />
+            <button onClick={addTask} disabled={!newTaskTitle.trim()}>Add</button>
+          </div>
+          
+          <div className="task-list">
+            {filteredTasks.length === 0 ? (
+              <div className="task-empty">
+                {filter === 'all' 
+                  ? 'No tasks yet. Add one above!' 
+                  : `No ${filter} priority tasks`}
+              </div>
+            ) : (
+              filteredTasks.map(task => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  onToggle={() => toggleTask(task.id)}
+                  onPriorityChange={(p) => updateTaskPriority(task.id, p)}
+                  onDelete={() => deleteTask(task.id)}
+                  onEdit={() => setEditingTask(task)}
+                />
+              ))
+            )}
+          </div>
+        </div>
+      )}
+      
       <div className="flow-container">
         <ReactFlow
           nodes={nodes}
@@ -372,6 +637,13 @@ function App() {
       <div className="instructions">
         Click Next to reveal each step
       </div>
+      
+      {/* Edit Modal */}
+      <EditTaskModal
+        task={editingTask}
+        onSave={saveEditedTask}
+        onCancel={() => setEditingTask(null)}
+      />
     </div>
   );
 }

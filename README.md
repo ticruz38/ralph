@@ -28,7 +28,26 @@ cp /path/to/ralph/prompt.md scripts/ralph/
 chmod +x scripts/ralph/ralph.sh
 ```
 
-### Option 2: Install skills globally
+### Option 2: Global alias (recommended)
+
+Add to `~/.bashrc` or `~/.zshrc`:
+
+```bash
+alias ralph='/path/to/ralph/ralph.sh'
+```
+
+Then reload your shell:
+```bash
+source ~/.bashrc  # or source ~/.zshrc
+```
+
+Now you can run `ralph` from any project directory:
+```bash
+cd ~/my-project
+ralph -d --worktree
+```
+
+### Option 3: Install skills globally
 
 Copy the skills to your Amp config for use across all projects:
 
@@ -88,6 +107,38 @@ Ralph will:
 6. Update `prd.json` to mark story as `passes: true`
 7. Append learnings to `progress.txt`
 8. Repeat until all stories pass or max iterations reached
+
+#### Daemon Mode
+
+Run Ralph in the background with `-d` or `--daemon`:
+
+```bash
+./scripts/ralph/ralph.sh -d              # Start daemon with default 10 iterations
+./scripts/ralph/ralph.sh -d 50           # Start daemon with 50 iterations
+./scripts/ralph/ralph.sh -d --worktree   # Daemon mode with worktree
+
+./scripts/ralph/ralph.sh status          # Check if daemon is running (for current prd.json)
+./scripts/ralph/ralph.sh stop            # Stop the daemon (for current prd.json)
+./scripts/ralph/ralph.sh list            # List ALL running Ralph daemons
+```
+
+**Multiple concurrent daemons**: You can run one daemon per branch. Ralph uses the `branchName` from `prd.json` to isolate PID files and logs:
+
+```bash
+# Terminal 1 - Auth feature
+cat prd.json | jq '.branchName'  # "ralph/add-auth"
+./scripts/ralph/ralph.sh -d --worktree
+
+# Terminal 2 - Payment feature (switch prd.json)
+cat prd.json | jq '.branchName'  # "ralph/add-payments"
+./scripts/ralph/ralph.sh -d --worktree
+
+# Both daemons run independently!
+./scripts/ralph/ralph.sh status  # Shows the daemon for current branch
+./scripts/ralph/ralph.sh list    # Shows ALL running daemons across all projects
+```
+
+Daemon output (status messages) goes to `/tmp/ralph-{project}-{branch}.log`. Per-story logs still go to `logs/` in your project.
 
 ## Key Files
 
